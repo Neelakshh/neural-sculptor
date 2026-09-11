@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Neural Sculptor</title>
+<link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+
+<div id="canvas-wrap"></div>
+
+<div class="lockup">
+  <h1>Neural Sculptor</h1>
+  <p>A 16&rarr;64&rarr;32 MLP, trained in PyTorch, inferred in-browser via ONNX Runtime Web.</p>
+</div>
+
+<div id="readout">
+  <div class="hd">AUDIO &rarr; LATENT</div>
+  <div class="row"><span>valence</span><span id="r-valence">0.00</span></div>
+  <div class="row"><span>arousal</span><span id="r-arousal">0.00</span></div>
+  <div class="row"><span>tension</span><span id="r-tension">0.00</span></div>
+  <div class="row"><span>density</span><span id="r-density">0.00</span></div>
+  <div class="row"><span>rms</span><span id="r-rms">0.000</span></div>
+  <div class="row"><span>onset</span><span id="r-onset">&ndash;</span></div>
+  <div class="row"><span>inference</span><span id="r-infer">&ndash; ms</span></div>
+  <div class="row"><span>fps</span><span id="r-fps">&ndash;</span></div>
+</div>
+
+<div id="gallery"></div>
+
+<div id="controls">
+  <div class="hint">space = burst &middot; shift = freeze &middot; scroll = zoom &middot; S = snapshot</div>
+  <div class="hint" id="backend-hint">inference: loading&hellip;</div>
+  <button id="btn-record" disabled>&#9679; Record</button>
+  <button id="btn-narrate" disabled>&#9675; Narrate</button>
+</div>
+
+<div id="err"></div>
+
+<div id="gate">
+  <h1>Neural Sculptor</h1>
+  <p>Speak, hum, or move your cursor. A trained neural network turns that into a 32-dimensional latent vector that drives the scene.</p>
+  <div class="btn-row">
+    <button class="primary" id="btn-mic" disabled>Start with microphone</button>
+    <button id="btn-nomic" disabled>Start without mic</button>
+  </div>
+  <div id="loading" style="color:#7A8290;font-size:12px;margin-top:8px;">loading model&hellip;</div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

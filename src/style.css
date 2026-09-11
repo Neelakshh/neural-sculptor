@@ -1,0 +1,85 @@
+:root {
+  --void: #0B0E14;
+  --panel: rgba(18, 22, 32, 0.62);
+  --panel-border: rgba(255, 122, 69, 0.14);
+  --ink: #E8E6E1;
+  --ink-muted: #7A8290;
+  --ember: #FF7A45;
+  --teal: #5EEAD4;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%;
+  background: var(--void); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+#canvas-wrap { position: fixed; inset: 0; }
+canvas { display: block; }
+.lockup { position: fixed; top: 28px; left: 28px; z-index: 10; pointer-events: none; }
+.lockup h1 { font-family: Georgia, serif; font-size: 22px; font-weight: 500; }
+.lockup p { font-size: 12.5px; color: var(--ink-muted); margin-top: 4px; max-width: 280px; line-height: 1.45; }
+#readout {
+  position: fixed; bottom: 24px; left: 24px; z-index: 10;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  backdrop-filter: blur(14px); border-radius: 10px;
+  padding: 14px 16px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px; line-height: 1.9; color: var(--ink-muted);
+  min-width: 200px;
+}
+#readout .row { display: flex; justify-content: space-between; gap: 18px; }
+#readout .row span:last-child { color: var(--ink); }
+#readout .hd { color: var(--ember); font-size: 10px; margin-bottom: 6px; }
+#gallery {
+  position: fixed; top: 100px; right: 28px; z-index: 10;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.snap {
+  width: 32px; height: 32px; border-radius: 6px;
+  cursor: pointer; border: 1px solid rgba(255,255,255,0.1);
+  transition: transform 0.15s;
+}
+.snap:hover { transform: scale(1.2); border-color: var(--ember); }
+#controls {
+  position: fixed; bottom: 24px; right: 24px; z-index: 10;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+}
+.hint {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px; color: var(--ink-muted);
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 8px; padding: 7px 10px; backdrop-filter: blur(14px);
+}
+#controls button { font-size: 11.5px; padding: 8px 14px; min-width: 110px; text-align: center; }
+#gate {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 40%, #14192a 0%, var(--void) 70%);
+  text-align: center; gap: 22px;
+  transition: opacity 0.6s ease;
+}
+#gate.hidden { opacity: 0; pointer-events: none; }
+#gate h1 { font-family: Georgia, serif; font-size: 38px; font-weight: 500; }
+#gate p { color: var(--ink-muted); font-size: 14px; max-width: 420px; line-height: 1.6; }
+.btn-row { display: flex; gap: 12px; margin-top: 6px; }
+button {
+  font-family: inherit; font-size: 13.5px;
+  background: transparent; color: var(--ink);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px; padding: 11px 20px;
+  cursor: pointer; transition: border-color 0.2s, color 0.2s;
+}
+button:hover:not(:disabled) { border-color: var(--ember); color: var(--ember); }
+button.primary { border-color: var(--ember); color: var(--ember); }
+button.primary:hover:not(:disabled) { background: rgba(255,122,69,0.1); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+#err {
+  position: fixed; top: 28px; right: 28px; z-index: 20;
+  font-family: ui-monospace, monospace; font-size: 11.5px;
+  color: #ff8a8a; background: rgba(40,10,10,0.5);
+  border: 1px solid rgba(255,100,100,0.3);
+  border-radius: 8px; padding: 10px 14px; max-width: 320px;
+  display: none;
+}
