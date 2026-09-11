@@ -36,20 +36,32 @@ float snoise(vec3 v){
 
 const VERT = NOISE_GLSL + `
 uniform float uTime;
-uniform vec4 uLatentA;
-uniform vec4 uLatentB;
-uniform float uAmpDrive;
+uniform float uRms;         // 0..1 loudness (primary driver)
+uniform float uCentroid;    // 0..1 brightness
+uniform float uOnset;       // 0..1 impulse
+uniform float uHue;         // 0..1 color
+
 varying vec3 vNormal;
 varying float vDisp;
 varying vec3 vWorldPos;
+
 void main() {
   vNormal = normal;
-  float freq = 1.2 + uLatentA.x * 1.8;
-  float n = snoise(position * freq + vec3(uTime * 0.15 + uLatentA.y, uTime * 0.1, uLatentB.x));
-  n += 0.5 * snoise(position * freq * 2.1 + vec3(uLatentB.y, uLatentB.z, uTime * 0.2));
-  float amp = 0.18 + uAmpDrive * 0.5;
+
+  // Amplify RMS hard. Even a whisper reaches 0.3 here.
+  float amp = 0.15 + uRms * 2.8 + uOnset * 0.5;
+
+  // Frequency of noise reacts to brightness.
+  float freq = 0.8 + uCentroid * 3.0;
+
+  // Three octaves of noise, phase-shifted by time and onset.
+  float n = snoise(position * freq + vec3(uTime * 0.4, uTime * 0.3, uOnset * 2.0));
+  n += 0.5 * snoise(position * freq * 2.3 + vec3(uTime * 0.7));
+  n += 0.25 * snoise(position * freq * 5.1 + vec3(uTime * 1.1));
+
   float disp = n * amp;
   vDisp = disp;
+
   vec3 newPos = position + normal * disp;
   vec4 wp = modelMatrix * vec4(newPos, 1.0);
   vWorldPos = wp.xyz;
@@ -58,22 +70,32 @@ void main() {
 
 const FRAG = `
 uniform float uHue;
-uniform float uFresnel;
+uniform float uRms;
 uniform float uOnset;
 uniform float uTime;
 varying vec3 vNormal;
 varying float vDisp;
 varying vec3 vWorldPos;
+
 vec3 hsl2rgb(vec3 c){
   vec3 rgb = clamp(abs(mod(c.x*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0,0.0,1.0);
   return c.z + c.y*(rgb-0.5)*(1.0-abs(2.0*c.z-1.0));
 }
+
 void main() {
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
-  float fres = pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 2.0 + uFresnel * 2.0);
-  float hue = fract(uHue + vDisp * 0.15 + sin(uTime * 0.05) * 0.03);
-  vec3 base = hsl2rgb(vec3(hue, 0.65, 0.42 + vDisp * 0.3));
-  vec3 glow = hsl2rgb(vec3(fract(hue + 0.5), 0.8, 0.6)) * fres * (1.0 + uOnset * 1.5);
+  float fres = pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 2.0);
+
+  // Hue shifts with RMS — louder means warmer
+  float hue = fract(uHue + vDisp * 0.4 + uRms * 0.3);
+  // Saturation rises with loudness
+  float sat = 0.4 + uRms * 0.5;
+  // Brightness rises with displacement
+  float light = 0.35 + abs(vDisp) * 2.5 + uRms * 0.6 + uOnset * 0.4;
+
+  vec3 base = hsl2rgb(vec3(hue, sat, clamp(light, 0.05, 0.95)));
+  vec3 glow = hsl2rgb(vec3(fract(hue + 0.5), 0.9, 0.6)) * fres * (1.0 + uOnset * 3.0);
+
   gl_FragColor = vec4(base + glow, 1.0);
 }`;
 
@@ -85,26 +107,33 @@ export class Scene {
     this.renderer.setClearColor(0x0b0e14, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
+
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.camera = new THREE.PerspectiveCamera(
+      55, window.innerWidth / window.innerHeight, 0.1, 100
+    );
     this.camera.position.set(0, 0, 6.2);
     this.cameraTargetZ = 6.2;
-    const detail = window.innerWidth < 700 ? 4 : 6;
+
+    const detail = window.innerWidth < 700 ? 5 : 7;
     const geo = new THREE.IcosahedronGeometry(1.4, detail);
+
     this.uniforms = {
       uTime:     { value: 0 },
-      uLatentA:  { value: new THREE.Vector4(0, 0, 0, 0) },
-      uLatentB:  { value: new THREE.Vector4(0, 0, 0, 0) },
-      uAmpDrive: { value: 0 },
-      uHue:      { value: 0.55 },
-      uFresnel:  { value: 0.5 },
+      uRms:      { value: 0 },
+      uCentroid: { value: 0 },
       uOnset:    { value: 0 },
+      uHue:      { value: 0.55 },
     };
+
     const mat = new THREE.ShaderMaterial({
-      vertexShader: VERT, fragmentShader: FRAG, uniforms: this.uniforms,
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+      uniforms: this.uniforms,
     });
     this.mesh = new THREE.Mesh(geo, mat);
     this.scene.add(this.mesh);
+
     const COUNT = window.innerWidth < 700 ? 1200 : 3500;
     const positions = new Float32Array(COUNT * 3);
     for (let i = 0; i < COUNT; i++) {
@@ -118,38 +147,42 @@ export class Scene {
     const pGeo = new THREE.BufferGeometry();
     pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const pMat = new THREE.PointsMaterial({
-      color: 0xff7a45, size: 0.02, transparent: true,
-      opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false,
+      color: 0xff7a45, size: 0.025, transparent: true,
+      opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false,
     });
     this.particles = new THREE.Points(pGeo, pMat);
     this.scene.add(this.particles);
     this.particlePositions = positions;
+
     window.addEventListener('resize', () => this.onResize());
   }
+
   onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
-  update(latent, dt, onset, burst) {
+
+  // Direct drive: pass raw audio scalars straight in.
+  setAudio(rms, centroid, onset, hue) {
+    this.uniforms.uRms.value = rms;
+    this.uniforms.uCentroid.value = centroid;
+    this.uniforms.uOnset.value = onset;
+    this.uniforms.uHue.value = hue;
+  }
+
+  update(dt, burst) {
     const u = this.uniforms;
     u.uTime.value += dt;
-    u.uLatentA.value.set(latent[0], latent[1], latent[2], latent[3]);
-    u.uLatentB.value.set(latent[4], latent[5], latent[6], latent[7]);
-    u.uAmpDrive.value = (latent[8] + 1) / 2;
-    u.uHue.value      = (latent[9] + 1) / 2;
-    u.uFresnel.value  = (latent[10] + 1) / 2;
-    u.uOnset.value    = onset;
+
     const pos = this.particlePositions;
-    const driveX = latent[16] * 0.6;
-    const driveY = latent[17] * 0.6;
-    const driveZ = latent[18] * 0.6;
+    const speed = 1.0 + u.uRms.value * 6.0;
     for (let i = 0; i < pos.length; i += 3) {
-      const t = u.uTime.value * 0.4 + i;
-      let vx = Math.sin(t * 0.7 + driveY) * 0.004 + driveX * 0.006;
-      let vy = Math.cos(t * 0.5 + driveZ) * 0.004 + driveY * 0.006;
-      let vz = Math.sin(t * 0.3 + driveX) * 0.004 + driveZ * 0.006;
-      if (burst) { vx *= 8; vy *= 8; vz *= 8; }
+      const t = u.uTime.value + i * 0.001;
+      let vx = Math.sin(t * 0.7) * 0.005 * speed;
+      let vy = Math.cos(t * 0.5) * 0.005 * speed;
+      let vz = Math.sin(t * 0.3) * 0.005 * speed;
+      if (burst) { vx *= 10; vy *= 10; vz *= 10; }
       pos[i] += vx; pos[i + 1] += vy; pos[i + 2] += vz;
       const d = Math.hypot(pos[i], pos[i + 1], pos[i + 2]);
       if (d > 5 || d < 1.6) {

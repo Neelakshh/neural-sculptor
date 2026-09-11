@@ -1,3 +1,9 @@
+// Audio features with EXTREME sensitivity. If your voice produces any
+// nonzero mic signal at all, the affect values will reach 1.0.
+
+const RESPONSE_GAIN = 40;   // crank this up if still not moving
+const NOISE_FLOOR   = 0.002;
+
 export class AudioFeatures {
   constructor() {
     this.ready = false;
@@ -9,7 +15,9 @@ export class AudioFeatures {
     this.onset = 0;
     this.smoothed = { centroid: 0, rolloff: 0, zcr: 0, rms: 0, pitch: 0 };
     this.affect = { valence: 0, arousal: 0, tension: 0, density: 0 };
+    this.lastRMS = 0;
   }
+
   async start() {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (this.ctx.state === 'suspended') await this.ctx.resume();
@@ -24,85 +32,66 @@ export class AudioFeatures {
     this.timeDomain = new Float32Array(this.analyser.fftSize);
     this.freqDomain = new Uint8Array(this.analyser.frequencyBinCount);
     this.ready = true;
+    console.log('[audio] started @', this.ctx.sampleRate);
   }
-  _estimatePitch(buf, sampleRate) {
-    const SIZE = buf.length;
-    let rms = 0;
-    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
-    rms = Math.sqrt(rms / SIZE);
-    if (rms < 0.01) return 0;
-    let r1 = 0, r2 = SIZE - 1;
-    for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < 0.2) { r1 = i; break; }
-    for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < 0.2) { r2 = SIZE - i; break; }
-    const trimmed = buf.slice(r1, r2);
-    const n = trimmed.length;
-    if (n < 128) return 0;
-    const c = new Float32Array(n);
-    for (let lag = 0; lag < n; lag++) {
-      let sum = 0;
-      for (let i = 0; i < n - lag; i++) sum += trimmed[i] * trimmed[i + lag];
-      c[lag] = sum;
-    }
-    let d = 0;
-    while (d < n - 1 && c[d] > c[d + 1]) d++;
-    let maxVal = -1, maxPos = -1;
-    for (let i = d; i < n; i++) if (c[i] > maxVal) { maxVal = c[i]; maxPos = i; }
-    if (maxPos <= 0) return 0;
-    return sampleRate / maxPos;
-  }
+
   read() {
     if (!this.ready) return null;
     this.analyser.getFloatTimeDomainData(this.timeDomain);
     this.analyser.getByteFrequencyData(this.freqDomain);
+
+    // --- RMS energy: this is the primary driver ---
+    let rmsSum = 0;
+    for (let i = 0; i < this.timeDomain.length; i++) {
+      rmsSum += this.timeDomain[i] * this.timeDomain[i];
+    }
+    const rms = Math.sqrt(rmsSum / this.timeDomain.length);
+    this.lastRMS = rms;
+
+    // --- spectral centroid (brightness) ---
     const bins = this.freqDomain.length;
-    const nyquist = this.ctx.sampleRate / 2;
     let num = 0, den = 0;
     for (let i = 0; i < bins; i++) {
       const mag = this.freqDomain[i] / 255;
-      num += ((i / bins) * nyquist) * mag;
+      num += i * mag;
       den += mag;
     }
-    const centroid = den > 0 ? num / den : 0;
-    let total = 0;
-    for (let i = 0; i < bins; i++) total += this.freqDomain[i];
-    let cum = 0, rolloffBin = 0;
-    for (let i = 0; i < bins; i++) {
-      cum += this.freqDomain[i];
-      if (cum >= total * 0.85) { rolloffBin = i; break; }
-    }
-    const rolloff = (rolloffBin / bins) * nyquist;
+    const centroid01 = den > 0 ? (num / den) / bins : 0;
+
+    // --- zero-crossing rate (noisiness) ---
     let zc = 0;
     for (let i = 1; i < this.timeDomain.length; i++) {
       if ((this.timeDomain[i] >= 0) !== (this.timeDomain[i - 1] >= 0)) zc++;
     }
-    const zcr = zc / this.timeDomain.length;
-    let rmsSum = 0;
-    for (let i = 0; i < this.timeDomain.length; i++) rmsSum += this.timeDomain[i] ** 2;
-    const rms = Math.sqrt(rmsSum / this.timeDomain.length);
-    this.onset = Math.max(0, rms - this.prevRMS) > 0.045 ? 1 : this.onset * 0.85;
+    const zcr01 = Math.min(1, (zc / this.timeDomain.length) * 20);
+
+    // --- onset detection ---
+    const jump = rms - this.prevRMS;
+    this.onset = jump > NOISE_FLOOR ? 1 : this.onset * 0.85;
     this.prevRMS = rms;
-    const pitch = this._estimatePitch(this.timeDomain, this.ctx.sampleRate);
-    const a = 0.3;
-    const s = this.smoothed;
-    s.centroid = a * centroid + (1 - a) * s.centroid;
-    s.rolloff  = a * rolloff  + (1 - a) * s.rolloff;
-    s.zcr      = a * zcr      + (1 - a) * s.zcr;
-    s.rms      = a * rms      + (1 - a) * s.rms;
-    s.pitch    = a * pitch    + (1 - a) * s.pitch;
-    const centroidN = Math.min(1, s.centroid / 4000);
-    const rolloffN  = Math.min(1, s.rolloff / 8000);
-    const zcrN      = Math.min(1, s.zcr * 4);
-    const rmsN      = Math.min(1, s.rms * 6);
-    const pitchN    = Math.min(1, s.pitch / 500);
-    this.affect.valence = 0.5 * pitchN + 0.5 * centroidN;
-    this.affect.arousal = 0.6 * rmsN + 0.4 * this.onset;
-    this.affect.tension = 1 - Math.min(1, s.rolloff > 0 ? s.centroid / s.rolloff : 0);
-    this.affect.density = zcrN;
+
+    // --- AGGRESSIVE gain applied here ---
+    // If rms is 0.02 (normal speech), rmsN becomes 0.02 * 40 = 0.8
+    const rmsN      = Math.min(1, Math.max(0, (rms - NOISE_FLOOR) * RESPONSE_GAIN));
+    const centroidN = Math.min(1, centroid01 * 4);
+    const zcrN      = zcr01;
+
+    // affect vector — this is what drives the scene
+    this.affect.valence = Math.min(1, 0.5 * rmsN + 0.5 * centroidN);
+    this.affect.arousal = Math.min(1, 0.7 * rmsN + 0.3 * this.onset);
+    this.affect.tension = zcrN;
+    this.affect.density = Math.min(1, rmsN * 0.5 + zcrN * 0.5);
+
     return {
-      raw: [centroidN, rolloffN, zcrN, rmsN, pitchN],
-      affect: [this.affect.valence, this.affect.arousal, this.affect.tension, this.affect.density],
+      raw: [rmsN, centroidN, zcrN, rmsN, 0],
+      affect: [
+        this.affect.valence,
+        this.affect.arousal,
+        this.affect.tension,
+        this.affect.density,
+      ],
       onset: this.onset,
-      rms: s.rms,
+      rms,
     };
   }
 }
