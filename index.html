@@ -2,50 +2,75 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0B0E14" />
+
 <title>Neural Sculptor</title>
+
+<meta name="description" content="A real-time neural-controlled 3D instrument. Speak, hum, or move your cursor — a trained MLP turns audio features into a 32-dimensional latent vector that drives geometry in your browser." />
+
+<meta property="og:title" content="Neural Sculptor" />
+<meta property="og:description" content="A 3D instrument you play with your voice. Neural network runs on-device, under 20 ms latency, no server." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://neural-sculptor.vercel.app" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Neural Sculptor" />
+<meta name="twitter:description" content="A 3D instrument you play with your voice. Neural network runs on-device." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
 <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
 
+<!-- three.js canvas mounts here -->
 <div id="canvas-wrap"></div>
 
-<div class="lockup">
-  <h1>Neural Sculptor</h1>
-  <p>A 16&rarr;64&rarr;32 MLP, trained in PyTorch, inferred in-browser via ONNX Runtime Web.</p>
-</div>
+<!-- CSS noise grain overlay for a subtle filmic feel -->
+<div id="grain"></div>
 
-<div id="readout">
-  <div class="hd">AUDIO &rarr; LATENT</div>
-  <div class="row"><span>valence</span><span id="r-valence">0.00</span></div>
-  <div class="row"><span>arousal</span><span id="r-arousal">0.00</span></div>
-  <div class="row"><span>tension</span><span id="r-tension">0.00</span></div>
-  <div class="row"><span>density</span><span id="r-density">0.00</span></div>
-  <div class="row"><span>rms</span><span id="r-rms">0.000</span></div>
-  <div class="row"><span>onset</span><span id="r-onset">&ndash;</span></div>
-  <div class="row"><span>inference</span><span id="r-infer">&ndash; ms</span></div>
-  <div class="row"><span>fps</span><span id="r-fps">&ndash;</span></div>
-</div>
+<!-- vignette -->
+<div id="vignette"></div>
 
-<div id="gallery"></div>
+<!-- legacy DOM containers kept for compatibility with main.js; hidden at runtime -->
+<div id="readout" style="display:none"></div>
+<div id="controls" style="display:none"></div>
+<div id="gallery" style="display:none"></div>
 
-<div id="controls">
-  <div class="hint">space = burst &middot; shift = freeze &middot; scroll = zoom &middot; S = snapshot</div>
-  <div class="hint" id="backend-hint">inference: loading&hellip;</div>
-  <button id="btn-record" disabled>&#9679; Record</button>
-  <button id="btn-narrate" disabled>&#9675; Narrate</button>
-</div>
-
+<!-- error toast -->
 <div id="err"></div>
 
+<!-- startup gate -->
 <div id="gate">
+  <div class="gate-mark">
+    <div class="mark-ring"></div>
+    <div class="mark-core"></div>
+  </div>
+
   <h1>Neural Sculptor</h1>
-  <p>Speak, hum, or move your cursor. A trained neural network turns that into a 32-dimensional latent vector that drives the scene.</p>
+
+  <p class="tagline">A 3D instrument you play with your voice.</p>
+
+  <p class="sub">
+    Speak, hum, or move your cursor. A small neural network running on your
+    device turns sound into geometry — in under 20 milliseconds. No server.
+    No API. Nothing leaves your machine.
+  </p>
+
   <div class="btn-row">
-    <button class="primary" id="btn-mic" disabled>Start with microphone</button>
+    <button class="primary" id="btn-mic" disabled>
+      <span class="dot"></span>
+      Start with microphone
+    </button>
     <button id="btn-nomic" disabled>Start without mic</button>
   </div>
-  <div id="loading" style="color:#7A8290;font-size:12px;margin-top:8px;">loading model&hellip;</div>
+
+  <div id="loading" class="loading">loading model&hellip;</div>
+
+  <div class="footer">
+    <span>built with Three.js · ONNX Runtime Web · PyTorch</span>
+  </div>
 </div>
 
 <script type="module" src="/src/main.js"></script>

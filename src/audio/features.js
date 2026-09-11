@@ -1,7 +1,7 @@
-// Audio features with EXTREME sensitivity. If your voice produces any
-// nonzero mic signal at all, the affect values will reach 1.0.
+// Audio feature extractor, tuned for a responsive live demo: normal speech
+// volume should visibly move the scene without needing to shout at the mic.
 
-const RESPONSE_GAIN = 40;   // crank this up if still not moving
+const RESPONSE_GAIN = 40;   // raise for a quieter mic, lower if it's too twitchy
 const NOISE_FLOOR   = 0.002;
 
 export class AudioFeatures {
@@ -24,6 +24,7 @@ export class AudioFeatures {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
+    this.stream = stream; // kept so Recorder can mux the mic into the export
     const source = this.ctx.createMediaStreamSource(stream);
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;

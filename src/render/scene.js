@@ -36,32 +36,22 @@ float snoise(vec3 v){
 
 const VERT = NOISE_GLSL + `
 uniform float uTime;
-uniform float uRms;         // 0..1 loudness (primary driver)
-uniform float uCentroid;    // 0..1 brightness
-uniform float uOnset;       // 0..1 impulse
-uniform float uHue;         // 0..1 color
-
+uniform float uRms;
+uniform float uCentroid;
+uniform float uOnset;
+uniform float uHue;
 varying vec3 vNormal;
 varying float vDisp;
 varying vec3 vWorldPos;
-
 void main() {
   vNormal = normal;
-
-  // Amplify RMS hard. Even a whisper reaches 0.3 here.
   float amp = 0.15 + uRms * 2.8 + uOnset * 0.5;
-
-  // Frequency of noise reacts to brightness.
   float freq = 0.8 + uCentroid * 3.0;
-
-  // Three octaves of noise, phase-shifted by time and onset.
   float n = snoise(position * freq + vec3(uTime * 0.4, uTime * 0.3, uOnset * 2.0));
   n += 0.5 * snoise(position * freq * 2.3 + vec3(uTime * 0.7));
   n += 0.25 * snoise(position * freq * 5.1 + vec3(uTime * 1.1));
-
   float disp = n * amp;
   vDisp = disp;
-
   vec3 newPos = position + normal * disp;
   vec4 wp = modelMatrix * vec4(newPos, 1.0);
   vWorldPos = wp.xyz;
@@ -76,26 +66,18 @@ uniform float uTime;
 varying vec3 vNormal;
 varying float vDisp;
 varying vec3 vWorldPos;
-
 vec3 hsl2rgb(vec3 c){
   vec3 rgb = clamp(abs(mod(c.x*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0,0.0,1.0);
   return c.z + c.y*(rgb-0.5)*(1.0-abs(2.0*c.z-1.0));
 }
-
 void main() {
   vec3 viewDir = normalize(cameraPosition - vWorldPos);
   float fres = pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 2.0);
-
-  // Hue shifts with RMS — louder means warmer
   float hue = fract(uHue + vDisp * 0.4 + uRms * 0.3);
-  // Saturation rises with loudness
   float sat = 0.4 + uRms * 0.5;
-  // Brightness rises with displacement
   float light = 0.35 + abs(vDisp) * 2.5 + uRms * 0.6 + uOnset * 0.4;
-
   vec3 base = hsl2rgb(vec3(hue, sat, clamp(light, 0.05, 0.95)));
   vec3 glow = hsl2rgb(vec3(fract(hue + 0.5), 0.9, 0.6)) * fres * (1.0 + uOnset * 3.0);
-
   gl_FragColor = vec4(base + glow, 1.0);
 }`;
 
@@ -106,18 +88,38 @@ export class Scene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(0x0b0e14, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.1;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x0b0e14, 0.04);
+
     this.camera = new THREE.PerspectiveCamera(
       55, window.innerWidth / window.innerHeight, 0.1, 100
     );
-    this.camera.position.set(0, 0, 6.2);
-    this.cameraTargetZ = 6.2;
+    this.camera.position.set(0, 0.4, 8.2);
+    this.cameraTargetZ = 8.2;
 
+    // --- lighting for the 3D UI elements ---
+    const ambient = new THREE.AmbientLight(0x404060, 0.6);
+    this.scene.add(ambient);
+
+    const key = new THREE.DirectionalLight(0xff7a45, 1.2);
+    key.position.set(5, 5, 5);
+    this.scene.add(key);
+
+    const rim = new THREE.DirectionalLight(0x5eead4, 0.8);
+    rim.position.set(-5, -2, -5);
+    this.scene.add(rim);
+
+    const fill = new THREE.PointLight(0xa78bfa, 1.5, 20);
+    fill.position.set(0, 3, 0);
+    this.scene.add(fill);
+
+    // --- the sculpture ---
     const detail = window.innerWidth < 700 ? 5 : 7;
     const geo = new THREE.IcosahedronGeometry(1.4, detail);
-
     this.uniforms = {
       uTime:     { value: 0 },
       uRms:      { value: 0 },
@@ -125,7 +127,6 @@ export class Scene {
       uOnset:    { value: 0 },
       uHue:      { value: 0.55 },
     };
-
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
@@ -134,6 +135,7 @@ export class Scene {
     this.mesh = new THREE.Mesh(geo, mat);
     this.scene.add(this.mesh);
 
+    // --- ambient dust particles ---
     const COUNT = window.innerWidth < 700 ? 1200 : 3500;
     const positions = new Float32Array(COUNT * 3);
     for (let i = 0; i < COUNT; i++) {
@@ -163,7 +165,6 @@ export class Scene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  // Direct drive: pass raw audio scalars straight in.
   setAudio(rms, centroid, onset, hue) {
     this.uniforms.uRms.value = rms;
     this.uniforms.uCentroid.value = centroid;

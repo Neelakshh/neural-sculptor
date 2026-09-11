@@ -2,6 +2,13 @@ import './style.css';
 import { AudioFeatures } from './audio/features.js';
 import { Scene } from './render/scene.js';
 import { Effects } from './render/effects.js';
+import { UI3D } from './render/ui3d.js';
+
+// Hide the old HTML overlays — the UI is now in 3D.
+['readout', 'controls', 'gallery'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.style.display = 'none';
+});
 
 const gate = document.getElementById('gate');
 const loadingEl = document.getElementById('loading');
@@ -11,12 +18,17 @@ const btnNoMic = document.getElementById('btn-nomic');
 
 const sceneObj = new Scene(document.getElementById('canvas-wrap'));
 const effects = new Effects(sceneObj.scene);
+const ui = new UI3D(sceneObj.scene, sceneObj.camera, sceneObj.renderer.domElement);
 const audio = new AudioFeatures();
 
 let micMode = false;
 let frozen = false;
 let burstUntil = 0;
 let lastShatter = 0;
+let isRecording = false;
+let narrate = false;
+let recorder = null;
+const snapshots = [];
 const cursor = { x: 0, y: 0, vx: 0, vy: 0, px: 0, py: 0 };
 
 window.addEventListener('mousemove', (e) => {
@@ -28,24 +40,78 @@ window.addEventListener('mousemove', (e) => {
   cursor.x = nx; cursor.y = ny;
 });
 window.addEventListener('wheel', (e) => {
-  sceneObj.cameraTargetZ = Math.min(11, Math.max(3.5,
+  sceneObj.cameraTargetZ = Math.min(13, Math.max(4.5,
     sceneObj.cameraTargetZ + e.deltaY * 0.003));
 }, { passive: true });
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     burstUntil = performance.now() + 900;
-    // big blast on Space
     const hue = 0.55 + (Math.random() - 0.5) * 0.2;
     effects.blast(400, null, 5.0, hue);
     effects.spawnRing(hue, 6.0);
     e.preventDefault();
   }
   if (e.key === 'Shift') frozen = true;
+  if (e.key === 's' || e.key === 'S') takeSnapshot();
 });
 window.addEventListener('keyup', (e) => { if (e.key === 'Shift') frozen = false; });
 
-backendHint.textContent = 'direct drive + effects';
-loadingEl.textContent = 'ready — click to start';
+// ---- wire the 3D control ring ----
+ui.onClick(ui.ringSegments.find(s => s.userData.id === 'burst'), () => {
+  burstUntil = performance.now() + 900;
+  const hue = 0.55 + (Math.random() - 0.5) * 0.2;
+  effects.blast(400, null, 5.0, hue);
+  effects.spawnRing(hue, 6.0);
+});
+ui.onClick(ui.ringSegments.find(s => s.userData.id === 'snapshot'), () => {
+  takeSnapshot();
+});
+ui.onClick(ui.ringSegments.find(s => s.userData.id === 'reset'), () => {
+  snapshots.length = 0;
+  ui.setSnapshots([], () => {});
+  effects.blast(100, null, 3.0, 0.75);
+});
+ui.onClick(ui.ringSegments.find(s => s.userData.id === 'record'), () => {
+  toggleRecord();
+});
+ui.onClick(ui.ringSegments.find(s => s.userData.id === 'narrate'), () => {
+  narrate = !narrate;
+  ui.setRingActive('narrate', narrate);
+});
+
+async function toggleRecord() {
+  if (!isRecording) {
+    const { Recorder } = await import('./recording/recorder.js');
+    let audioStream = null;
+    if (audio.ctx && audio.ready) {
+      const dest = audio.ctx.createMediaStreamDestination();
+      audio.analyser.connect(dest);
+      audioStream = dest.stream;
+    }
+    recorder = new Recorder(sceneObj.renderer.domElement, audioStream);
+    recorder.start();
+    isRecording = true;
+    ui.setRingActive('record', true);
+  } else {
+    await recorder.stop();
+    isRecording = false;
+    ui.setRingActive('record', false);
+  }
+}
+
+function takeSnapshot() {
+  snapshots.push({
+    latent: new Float32Array([0]),
+    hue: (0.55 + Math.random() * 0.3) % 1,
+  });
+  ui.setSnapshots(snapshots, (snap) => {
+    effects.blast(60, null, 2.0, snap.hue);
+  });
+  effects.blast(80, null, 3.0, 0.08);
+}
+
+backendHint.textContent = 'ready';
+loadingEl.textContent = 'ready - click to start';
 btnMic.disabled = false;
 btnNoMic.disabled = false;
 
@@ -54,13 +120,9 @@ async function begin(withMic) {
     try {
       await audio.start();
       micMode = true;
-      backendHint.textContent = 'listening';
     } catch (err) {
-      backendHint.textContent = 'mic denied — cursor only';
       micMode = false;
     }
-  } else {
-    backendHint.textContent = 'cursor only';
   }
   gate.classList.add('hidden');
   requestAnimationFrame(loop);
@@ -80,12 +142,12 @@ function loop(now) {
   if (fpsAccum > 0.5) {
     fps = fpsCount / fpsAccum;
     fpsAccum = 0; fpsCount = 0;
-    document.getElementById('r-fps').textContent = fps.toFixed(1);
   }
 
   if (frozen) {
     sceneObj.update(0, false);
     effects.update(0, 0, 0, 0.5);
+    ui.update(now * 0.001, { rms: 0 });
     return;
   }
 
@@ -109,27 +171,28 @@ function loop(now) {
 
   const burst = performance.now() < burstUntil;
 
-  // continuous particle emission driven by loudness
   if (rms > 0.4) {
     const count = Math.floor(rms * 15);
     effects.blast(count, null, 1.5 + rms * 2.5, hue);
   }
-
-  // onset-triggered shatter — but only every 2 seconds
   if (onset > 0.6 && now - lastShatter > 2000) {
     effects.shatter();
     lastShatter = now;
+    ui.triggerOnset();
   }
 
   sceneObj.setAudio(rms, centroid, onset, hue);
   sceneObj.update(dt, burst);
   effects.update(dt, rms, onset, hue);
 
-  document.getElementById('r-valence').textContent = rms.toFixed(2);
-  document.getElementById('r-arousal').textContent = centroid.toFixed(2);
-  document.getElementById('r-tension').textContent = onset.toFixed(2);
-  document.getElementById('r-density').textContent = (rms * 0.5 + centroid * 0.5).toFixed(2);
-  document.getElementById('r-rms').textContent = audio.lastRMS.toFixed(4);
-  document.getElementById('r-onset').textContent = onset > 0.5 ? 'BOOM' : '-';
-  document.getElementById('r-infer').textContent = 'direct';
+  ui.update(now * 0.001, { rms, centroid, onset });
+  ui.updatePanel({
+    rms, centroid, onset,
+    valence: rms,
+    arousal: centroid,
+    tension: onset,
+    density: (rms + centroid) / 2,
+    fps,
+    backend: 'direct',
+  });
 }
